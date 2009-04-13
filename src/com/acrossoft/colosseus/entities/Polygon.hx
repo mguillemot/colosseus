@@ -3,21 +3,38 @@
  * @author 
  */
 
-package com.acrossoft.colosseus;
+package com.acrossoft.colosseus.entities;
+import com.acrossoft.colosseus.entities.GameEntity;
 import com.acrossoft.colosseus.entities.Turret;
+import com.acrossoft.colosseus.GameContext;
+import com.acrossoft.colosseus.hitboxes.CircleHitbox;
 import flash.Boot;
 import flash.display.Shape;
 import flash.display.Sprite;
+import flash.events.Event;
 import flash.geom.Matrix3D;
 import flash.geom.Point;
 import flash.geom.Vector3D;
 
-class Polygon extends Sprite 
+class Polygon extends GameEntity 
 {
 
+	public static inline var XML_ROOT_NAME : String = "polygon";
+	
 	public function new() 
 	{
 		super();
+		m_points = new Array<Point>();
+		m_turrets = new Array<Turret>();
+	}
+	
+	public override function update(context : GameContext) : Void
+	{
+		super.update(context);
+		for (turret in m_turrets)
+		{
+			turret.update(context);
+		}
 	}
 	
 	private function recreateGraphics() : Void
@@ -25,7 +42,11 @@ class Polygon extends Sprite
 		graphics.clear();
 		if (m_points.length > 1)
 		{
-			graphics.lineStyle(2, if (m_selected) 0x007F0E else 0x00ff00);
+			if (!m_editing)
+			{
+				graphics.beginFill(if (m_selected) 0x42ECA3 else 0x42E43F, 0.8);
+			}
+			graphics.lineStyle(2, 0x007F0E);
 			var p : Point = m_points[0];
 			graphics.moveTo(p.x, p.y);
 			var last : Int = m_points.length;
@@ -38,23 +59,26 @@ class Polygon extends Sprite
 				p = m_points[i % m_points.length];
 				graphics.lineTo(p.x, p.y);
 			}
+			if (!m_editing)
+			{
+				graphics.endFill();
+			}
 		}
 		if (m_editing && m_points.length > 0)
 		{
-			graphics.lineStyle(2, 0x007F0E);
+			graphics.lineStyle(1, 0x0);
 			var lastPoint : Point = m_points[m_points.length - 1];
 			graphics.drawCircle(lastPoint.x, lastPoint.y, 2);
 		}
 		graphics.lineStyle(0);
 		graphics.beginFill(0xff0000);
 		graphics.drawCircle(0, 0, 5);
+		graphics.endFill();
 	}
 	
 	public function startEdit() : Void
 	{
 		m_editing = true;
-		m_points = new Array();
-		m_turrets = new Array();
 		recreateGraphics();
 	}
 	
@@ -75,7 +99,7 @@ class Polygon extends Sprite
 			if (m_points.length >= 2) 
 			{
 				var firstPoint : Point = m_points[0];
-				if (p.subtract(firstPoint).length < 3)
+				if (p.subtract(firstPoint).length < 10)
 				{
 					p = firstPoint;
 					m_editing = false;
@@ -99,19 +123,34 @@ class Polygon extends Sprite
 		return t;
 	}
 	
+	public function removeTurret(t : Turret) : Void
+	{
+		m_turrets.remove(t);
+		removeChild(t);
+	}
+	
 	public function isInside(p : Point) : Bool
 	{
+		if (!hitTestPoint(p.x, p.y))
+		{
+			return false;
+		}
+		var count : Int = 0;
+		var a : Point = getTransformedPoint(0);
 		for (i in 0...m_points.length)
 		{
-			var a : Point = getTransformedPoint(i);
 			var b : Point = getTransformedPoint(i + 1);
-			var right : Bool = partitionTest(a, b, p);
-			if (!right)
+			if (p.y > Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y) && p.x <= Math.max(a.x, b.x) && a.y != b.y)
 			{
-				return false;
+				var xInter : Float = (p.y - a.y) * (b.x - a.x) / (b.y - a.y) + a.x;
+				if (a.x == b.x || p.x <= xInter)
+				{
+					count++;
+				}
 			}
+			a = b;
 		}
-		return true;
+		return count % 2 != 0;
 	}
 	
 	public function getDistance(p : Point) : Float
@@ -134,6 +173,51 @@ class Polygon extends Sprite
 	{		
 		var p = m_points[i % m_points.length];
 		return localToGlobal(p);
+	}
+	
+	public function toXml() : Xml
+	{
+		var polygonNode : Xml = Xml.createElement(XML_ROOT_NAME);
+		polygonNode.set("x", Std.string(x));
+		polygonNode.set("y", Std.string(y));
+		polygonNode.set("rotation", Std.string(rotation));
+		for (point in m_points)
+		{
+			var pointNode : Xml = Xml.createElement("point");
+			pointNode.set("x", Std.string(point.x));
+			pointNode.set("y", Std.string(point.y));
+			polygonNode.addChild(pointNode);
+		}
+		for (turret in m_turrets)
+		{
+			var turretNode : Xml = turret.toXml();
+			polygonNode.addChild(turretNode);
+		}
+		return polygonNode;
+	}
+	
+	public function fromXml(xml : Xml) : Void
+	{
+		x = Std.parseFloat(xml.get("x"));
+		y = Std.parseFloat(xml.get("y"));
+		rotation = Std.parseFloat(xml.get("rotation"));
+		m_points = new Array<Point>();
+		for (pointData in xml.elementsNamed("point"))
+		{
+			var point : Point = new Point();
+			point.x = Std.parseFloat(pointData.get("x"));
+			point.y = Std.parseFloat(pointData.get("y"));
+			m_points.push(point);
+		}
+		for (turretData in xml.elementsNamed(Turret.XML_ROOT_NAME))
+		{
+			var turret : Turret = new Turret();
+			turret.fromXml(turretData);
+			m_turrets.push(turret);
+			addChild(turret);
+			turret.startFire();
+		}
+		recreateGraphics();
 	}
 	
 	/**
@@ -182,6 +266,7 @@ class Polygon extends Sprite
 	}
 
 	public var selected(getSelected, setSelected) : Bool;
+	public var turrets(getTurrets, null) : Array<Turret>;
 	
 	private function getSelected() : Bool
 	{
@@ -193,6 +278,11 @@ class Polygon extends Sprite
 		m_selected = value;
 		recreateGraphics();
 		return m_selected;
+	}
+	
+	private function getTurrets() : Array<Turret>
+	{
+		return m_turrets;
 	}
 	
 	private var m_points : Array<Point>;

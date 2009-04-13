@@ -4,22 +4,31 @@ import com.acrossoft.colosseus.entities.Bullet;
 import com.acrossoft.colosseus.entities.EnemyShip;
 import com.acrossoft.colosseus.entities.GameEntity;
 import com.acrossoft.colosseus.entities.PlayerShip;
+import com.acrossoft.colosseus.entities.Polygon;
 import com.acrossoft.colosseus.entities.Turret;
 import com.acrossoft.colosseus.tweens.CyclicSinTween;
 import com.acrossoft.colosseus.utils.LinkedList;
 import com.acrossoft.colosseus.utils.LinkedListIterator;
+import flash.display.AVM1Movie;
 import flash.display.Graphics;
 import flash.display.MovieClip;
+import flash.display.Shader;
 import flash.display.Shape;
 import flash.display.SimpleButton;
 import flash.display.Sprite;
+import flash.events.Event;
+import flash.events.FullScreenEvent;
 import flash.events.MouseEvent;
 import flash.events.KeyboardEvent;
+import flash.events.SyncEvent;
 import flash.events.TimerEvent;
 import flash.geom.Point;
 import flash.geom.Vector3D;
 import flash.Lib;
+import flash.net.FileReference;
+import flash.net.SharedObject;
 import flash.text.TextField;
+import flash.text.TextFieldAutoSize;
 import flash.utils.Timer;
 
 /**
@@ -44,36 +53,53 @@ class Main extends Sprite
 		m_enemyBullets = new Array<Bullet>();
 		m_polygons = new Array<Polygon>();
 		m_editMode = EditMode.NONE;
+		m_context = new GameContext();
+		m_context.currentTime = Lib.getTimer();
+		m_mousePosition = new Point();
 	}
 	
 	private function init() : Void
 	{
-		m_enemy = new EnemyShip();
-		m_enemy.x = 300;
-		m_enemy.y = 100;
-		Lib.current.addChild(m_enemy);
-
+		graphics.clear();
+		graphics.beginFill(0xffff80);
+		graphics.drawRect(0, 0, stage.stageWidth, stage.stageHeight);
+		graphics.endFill();
+		
+		m_nextButton = new Point(0, 0);
+		addButton("Create", onCreateButtonClick);
+		addButton("Move", onMoveButtonClick);
+		addButton("Rotate", onRotateButtonClick);
+		addButton("+Turret", onCreateTurretButtonClick);
+		addButton("-Turret", onDeleteTurretButtonClick);
+		addButton("ModTurret", onChangeTurretButtonClick);
+		addButton("Delete", onDeleteButtonClick);
+		addButton("Clear", onClearButtonClick);
+		addButton("Save", onSaveButtonClick);
+		addButton("Load", onLoadButtonClick);
+		
 		m_ship = new PlayerShip();
 		m_ship.x = 300;
 		m_ship.y = 300;
-		Lib.current.addChild(m_ship);
+		stage.addChild(m_ship);
 
 		stage.addEventListener(KeyboardEvent.KEY_DOWN, onKeyDown);
 		stage.addEventListener(KeyboardEvent.KEY_UP, onKeyUp);
 		stage.addEventListener(MouseEvent.MOUSE_DOWN, onMouseDown);
 		stage.addEventListener(MouseEvent.MOUSE_MOVE, onMouseMove);
 		
-		var timer : Timer = new Timer(1000.0 / 60);
-		timer.addEventListener(TimerEvent.TIMER, frameUpdate);
-		timer.start();
-
-		var timer2 : Timer = new Timer(600.0);
-		timer2.addEventListener(TimerEvent.TIMER, fireAtPlayer);
-		timer2.start();
-		
 		//var t : CyclicSinTween = new CyclicSinTween(300, 200, 5000, m_enemy, "x");
 		//t.start();
 		
+		m_mousePositionDisplay = new TextField();
+		m_mousePositionDisplay.background = true;
+		m_mousePositionDisplay.backgroundColor = 0xcccccc;
+		m_mousePositionDisplay.border = true;
+		m_mousePositionDisplay.width = 200;
+		m_mousePositionDisplay.height = 18;
+		m_mousePositionDisplay.x = stage.stageWidth - 205;
+		m_mousePositionDisplay.y = 5;
+		m_mousePositionDisplay.mouseEnabled = false;
+		stage.addChild(m_mousePositionDisplay);
 		m_myBulletsCountDisplay = new TextField();
 		m_myBulletsCountDisplay.background = true;
 		m_myBulletsCountDisplay.backgroundColor = 0xcccccc;
@@ -81,9 +107,9 @@ class Main extends Sprite
 		m_myBulletsCountDisplay.width = 200;
 		m_myBulletsCountDisplay.height = 18;
 		m_myBulletsCountDisplay.x = stage.stageWidth - 205;
-		m_myBulletsCountDisplay.y = 5;
+		m_myBulletsCountDisplay.y = 30;
 		m_myBulletsCountDisplay.mouseEnabled = false;
-		addChild(m_myBulletsCountDisplay);
+		stage.addChild(m_myBulletsCountDisplay);
 		m_enemyBulletsCountDisplay = new TextField();
 		m_enemyBulletsCountDisplay.background = true;
 		m_enemyBulletsCountDisplay.backgroundColor = 0xcccccc;
@@ -91,9 +117,9 @@ class Main extends Sprite
 		m_enemyBulletsCountDisplay.width = 200;
 		m_enemyBulletsCountDisplay.height = 18;
 		m_enemyBulletsCountDisplay.x = stage.stageWidth - 205;
-		m_enemyBulletsCountDisplay.y = 30;
+		m_enemyBulletsCountDisplay.y = 55;
 		m_enemyBulletsCountDisplay.mouseEnabled = false;
-		addChild(m_enemyBulletsCountDisplay);
+		stage.addChild(m_enemyBulletsCountDisplay);
 		m_modeDisplay = new TextField();
 		m_modeDisplay.background = true;
 		m_modeDisplay.backgroundColor = 0xcccccc;
@@ -101,30 +127,159 @@ class Main extends Sprite
 		m_modeDisplay.width = 200;
 		m_modeDisplay.height = 18;
 		m_modeDisplay.x = stage.stageWidth - 205;
-		m_modeDisplay.y = 60;
+		m_modeDisplay.y = 80;
 		m_modeDisplay.mouseEnabled = false;
-		addChild(m_modeDisplay);
+		stage.addChild(m_modeDisplay);
 		refreshFields();
+		
+		stage.addEventListener(Event.ENTER_FRAME, frameUpdate );
 	}
 	
+	private function addButton(label : String, onClick : Void -> Void) : Void
+	{
+		var button : Sprite = new Sprite();
+		button.x = stage.width - 200 + 100 * m_nextButton.x;
+		button.y = 120 + 40 * m_nextButton.y;
+		button.graphics.clear();
+		button.graphics.lineStyle(1, 0x0);
+		button.graphics.beginFill(0xcccccc);
+		button.graphics.drawRoundRect(0, 0, 80, 25, 10, 10);
+		button.graphics.endFill();
+		var text : TextField = new TextField();
+		button.addChild(text);
+		text.width = 80;
+		text.htmlText = '<font size="16">' + label + '</font>';
+		text.autoSize = TextFieldAutoSize.CENTER;
+		text.mouseEnabled = false;
+		button.addEventListener(MouseEvent.CLICK, function(e : MouseEvent) : Void { onClick(); });
+		stage.addChild(button);
+		
+		m_nextButton.x++;
+		if (m_nextButton.x == 2)
+		{
+			m_nextButton.y++;
+			m_nextButton.x = 0;
+		}
+	}
+	
+	private function onCreateButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.CREATE_PLACE_CENTER);
+	}
+	
+	private function onMoveButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.MOVE_CHOOSE);
+	}
+	
+	private function onRotateButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.ROTATE_CHOOSE);
+	}
+	
+	private function onDeleteButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.DELETE_CHOOSE);
+	}
+	
+	private function onCreateTurretButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.PLACE_TURRET_CHOOSE);
+	}
+	
+	private function onDeleteTurretButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.DELETE_TURRET);
+	}
+	
+	private function onChangeTurretButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		changeEditMode(EditMode.CHANGE_TURRET);
+	}
+	
+	private function onClearButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		for (poly in m_polygons)
+		{
+			stage.removeChild(poly);
+		}
+		m_polygons = new Array<Polygon>();
+	}
+	
+	private function onSaveButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		var save : SharedObject = SharedObject.getLocal("colosseus.stage");
+		var saveData : Xml = Xml.createDocument();
+		for (poly in m_polygons)
+		{
+			saveData.addChild(poly.toXml());
+		}
+		save.setProperty("polygons", saveData.toString());
+		trace("Saved: \n" + saveData + "\n***(end)***");
+	}
+
+	private function onLoadButtonClick() : Void
+	{
+		if (m_editMode != EditMode.NONE)
+		{
+			onEscape();
+		}
+		var save : SharedObject = SharedObject.getLocal("colosseus.stage");
+		var saveData : Xml = Xml.parse(save.data.polygons);
+		var polyCount : Int = 0;
+		for (polygonData in saveData.elementsNamed("polygon"))
+		{
+			var poly : Polygon = new Polygon();
+			poly.fromXml(polygonData);
+			stage.addChild(poly);
+			m_polygons.push(poly);
+			polyCount++;
+		}
+		trace("Loaded: " + polyCount + " polygon(s)");
+	}
+
 	private function refreshFields() : Void
 	{
+		m_mousePositionDisplay.text = "Mouse: " + m_mousePosition.x + " : " + m_mousePosition.y;
 		m_myBulletsCountDisplay.text = "My bullets: " + m_myBullets.length;
 		m_enemyBulletsCountDisplay.text = "Enemy bullets: " + m_enemyBullets.length;
 		m_modeDisplay.text = "Edit mode: " + m_editMode;
-	}
-	
-	private function fireAtPlayer(e : TimerEvent) : Void
-	{
-		var angle : Float = Math.atan2(m_ship.y - m_enemy.y, m_ship.x - m_enemy.x);
-		var bullet = new Bullet();
-		bullet.x = m_enemy.x;
-		bullet.y = m_enemy.y;
-		bullet.rotation = 90 + angle * 180 / Math.PI;
-		bullet.speed.x = 200 * Math.cos(angle);
-		bullet.speed.y = 200 * Math.sin(angle);
-		stage.addChild(bullet);		
-		m_enemyBullets.push(bullet);
 	}
 	
 	private function fireAtEnemy() : Void
@@ -137,40 +292,54 @@ class Main extends Sprite
 		m_myBullets.push(bullet);
 	}
 	
+	private function onEscape() : Void
+	{
+		switch (m_editMode)
+		{
+			case EditMode.CREATE_PLACE_CENTER:
+				changeEditMode(EditMode.NONE);
+			case EditMode.CREATE_ADD_POINT: 
+				stage.removeChild(m_editingPolygon);
+				m_editingPolygon = null;
+				changeEditMode(EditMode.NONE);
+			case EditMode.MOVE_CHOOSE:
+				changeEditMode(EditMode.NONE);
+			case EditMode.MOVE_WAIT_FOR_DROP:
+				m_selectedPolygon.x = m_editInitialPosition.x;
+				m_selectedPolygon.y = m_editInitialPosition.y;
+				m_selectedPolygon.stopDrag();
+				selectPoly(null);
+				changeEditMode(EditMode.NONE);
+			case EditMode.ROTATE_CHOOSE:
+				changeEditMode(EditMode.NONE);
+			case EditMode.ROTATE_WAIT_FOR_DROP:
+				m_selectedPolygon.rotation = m_editInitialRotation;
+				selectPoly(null);
+				changeEditMode(EditMode.NONE);
+			case EditMode.DELETE_CHOOSE:
+				changeEditMode(EditMode.NONE);
+			case EditMode.PLACE_TURRET_CHOOSE:
+				changeEditMode(EditMode.NONE);
+			case EditMode.PLACE_TURRET_WAIT_FOR_DROP:
+				stage.removeChild(m_placingTurret);
+				m_placingTurret = null;
+				selectPoly(null);
+				changeEditMode(EditMode.NONE);
+			case EditMode.CHANGE_TURRET:
+				changeEditMode(EditMode.NONE);
+			case EditMode.DELETE_TURRET:
+				changeEditMode(EditMode.NONE);
+			default:
+		}
+	}
+	
 	private function onKeyDown(e : KeyboardEvent) : Void
 	{
 		//trace("Key down ! " + e.keyCode);
 		switch (e.keyCode)
 		{
 			case 27: // Esc
-				switch (m_editMode)
-				{
-					case EditMode.CREATE_PLACE_CENTER:
-						changeEditMode(EditMode.NONE);
-					case EditMode.CREATE_ADD_POINT: 
-						removeChild(m_editingPolygon);
-						m_editingPolygon = null;
-						changeEditMode(EditMode.NONE);
-					case EditMode.MOVE_CHOOSE:
-						changeEditMode(EditMode.NONE);
-					case EditMode.MOVE_WAIT_FOR_DROP:
-						m_selectedPolygon.x = m_editInitialPosition.x;
-						m_selectedPolygon.y = m_editInitialPosition.y;
-						m_selectedPolygon.stopDrag();
-						selectPoly(null);
-						changeEditMode(EditMode.NONE);
-					case EditMode.ROTATE_CHOOSE:
-						changeEditMode(EditMode.NONE);
-					case EditMode.ROTATE_WAIT_FOR_DROP:
-						m_selectedPolygon.rotation = m_editInitialRotation;
-						selectPoly(null);
-						changeEditMode(EditMode.NONE);
-					case EditMode.DELETE_CHOOSE:
-						changeEditMode(EditMode.NONE);
-					case EditMode.PLACE_TURRET_CHOOSE:
-						changeEditMode(EditMode.NONE);
-					default:
-				}
+				onEscape();
 			case 37:
 				m_leftPressed = true;
 			case 39:
@@ -179,31 +348,8 @@ class Main extends Sprite
 				m_upPressed = true;
 			case 40:
 				m_downPressed = true;
-			case 68: // d
-				if (m_editMode == EditMode.NONE)
-				{
-					changeEditMode(EditMode.CREATE_PLACE_CENTER);
-				}
-			case 70: // f
-				if (m_editMode == EditMode.NONE)
-				{
-					changeEditMode(EditMode.MOVE_CHOOSE);
-				}
-			case 71: // g
-				if (m_editMode == EditMode.NONE)
-				{
-					changeEditMode(EditMode.ROTATE_CHOOSE);
-				}
-			case 72: // h
-				if (m_editMode == EditMode.NONE)
-				{
-					changeEditMode(EditMode.DELETE_CHOOSE);
-				}
-			case 74: //j
-				if (m_editMode == EditMode.NONE)
-				{
-					changeEditMode(EditMode.PLACE_TURRET_CHOOSE);
-				}
+			case 84: // t
+				m_context.hitboxVisible = !m_context.hitboxVisible;
 			case 87: // w
 				fireAtEnemy();
 		}
@@ -227,6 +373,7 @@ class Main extends Sprite
 	
 	private function onMouseDown(e : MouseEvent) : Void
 	{
+		//trace("Click @ " + e.stageX + ":" + e.stageY);
 		switch (m_editMode)
 		{
 			case EditMode.CREATE_PLACE_CENTER:
@@ -234,7 +381,7 @@ class Main extends Sprite
 				m_editingPolygon.x = e.stageX;
 				m_editingPolygon.y = e.stageY;
 				m_editingPolygon.startEdit();
-				addChild(m_editingPolygon);
+				stage.addChild(m_editingPolygon);
 				changeEditMode(EditMode.CREATE_ADD_POINT);
 			case EditMode.CREATE_ADD_POINT:
 				var p : Point = new Point(e.stageX - m_editingPolygon.x, e.stageY - m_editingPolygon.y);
@@ -271,10 +418,10 @@ class Main extends Sprite
 			case EditMode.MOVE_WAIT_FOR_DROP:
 				m_selectedPolygon.stopDrag();
 				selectPoly(null);
-				changeEditMode(EditMode.NONE);
+				changeEditMode(EditMode.MOVE_CHOOSE);
 			case EditMode.ROTATE_WAIT_FOR_DROP:
 				selectPoly(null);
-				changeEditMode(EditMode.NONE);
+				changeEditMode(EditMode.ROTATE_CHOOSE);
 			case EditMode.DELETE_CHOOSE:
 				var p : Point = new Point(e.stageX, e.stageY);
 				for (poly in m_polygons)
@@ -282,8 +429,7 @@ class Main extends Sprite
 					if (poly.isInside(p))
 					{
 						m_polygons.remove(poly);
-						removeChild(poly);
-						changeEditMode(EditMode.NONE);
+						stage.removeChild(poly);
 						break;
 					}
 				}
@@ -297,7 +443,7 @@ class Main extends Sprite
 						m_placingTurret = new Turret();
 						m_placingTurret.x = e.stageX;
 						m_placingTurret.y = e.stageY;
-						addChild(m_placingTurret);
+						stage.addChild(m_placingTurret);
 						m_placingTurret.startDrag();
 						changeEditMode(EditMode.PLACE_TURRET_WAIT_FOR_DROP);
 						break;
@@ -310,17 +456,38 @@ class Main extends Sprite
 					var t : Turret = m_selectedPolygon.addTurret(m_selectedPolygon.globalToLocal(p));
 					t.startFire();
 				}
-				m_placingTurret.stopDrag();
-				removeChild(m_placingTurret);
-				m_placingTurret = null;
-				selectPoly(null);
-				changeEditMode(EditMode.NONE);
+			case EditMode.CHANGE_TURRET:
+				for (poly in m_polygons)
+				{
+					for (turret in poly.turrets)
+					{
+						if (turret.hitTestPoint(e.stageX, e.stageY))
+						{
+							turret.changeType();
+							break;
+						}
+					}
+				}
+			case EditMode.DELETE_TURRET:
+				for (poly in m_polygons)
+				{
+					for (turret in poly.turrets)
+					{
+						if (turret.hitTestPoint(e.stageX, e.stageY))
+						{
+							poly.removeTurret(turret);
+							break;
+						}
+					}
+				}
 			default:
 		}
 	}
 	
 	private function onMouseMove(e : MouseEvent) : Void
 	{
+		m_mousePosition.x = e.stageX;
+		m_mousePosition.y = e.stageY;
 		if (m_editMode == EditMode.ROTATE_WAIT_FOR_DROP)
 		{
 			var ac : Vector3D = new Vector3D(e.stageX - m_selectedPolygon.x, e.stageY - m_selectedPolygon.y, 0);
@@ -350,10 +517,16 @@ class Main extends Sprite
 		}
 	}
 	
-	private function frameUpdate(e : TimerEvent) : Void
+	private function frameUpdate(e : Event) : Void
 	{
 		// Update tweens
 		com.acrossoft.colosseus.tweens.Tweens.tick();
+		
+		// Create context
+		m_context.stage = stage;
+		m_context.playerShip = m_ship;
+		m_context.elapsedTime = Lib.getTimer() - m_context.currentTime;
+		m_context.currentTime = Lib.getTimer();
 		
 		// Update player ship position
 		if (m_leftPressed)
@@ -372,12 +545,13 @@ class Main extends Sprite
 		{
 			m_ship.y += 3;
 		}
+		m_ship.update(m_context);
 		
 		// Update enemy bullets
 		var deadBullets : Array<Bullet> = new Array<Bullet>();
 		for (bullet in m_enemyBullets)
 		{
-			bullet.update();
+			bullet.update(m_context);
 			if (bullet.outOfStage(stage) || bullet.hits(m_ship))
 			{
 				deadBullets.push(bullet);
@@ -393,8 +567,8 @@ class Main extends Sprite
 		deadBullets = new Array<Bullet>();
 		for (bullet in m_myBullets)
 		{
-			bullet.update();
-			if (bullet.outOfStage(stage) || m_enemy.hits(bullet))
+			bullet.update(m_context);
+			if (bullet.outOfStage(stage))
 			{
 				deadBullets.push(bullet);
 			}
@@ -417,9 +591,27 @@ class Main extends Sprite
 			stage.removeChild(bullet);
 		}
 		
+		// Update entities
+		for (poly in m_polygons)
+		{
+			poly.update(m_context);
+		}
+		
+		// Add new bullets
+		for (bullet in m_context.bulletsToAdd)
+		{
+			m_enemyBullets.push(bullet);
+			stage.addChild(bullet);
+		}
+		
+		// Reset context
+		m_context.cleanup();
+		
 		// Update interface
 		refreshFields();
 	}
+	
+	private var m_nextButton : Point;
 	
 	private var m_editMode : EditMode;
 	private var m_editingPolygon : Polygon;
@@ -428,12 +620,15 @@ class Main extends Sprite
 	private var m_editInitialRotation : Float;
 	private var m_placingTurret : Turret;
 	
-	private var m_ship : GameEntity;
-	private var m_enemy : GameEntity;
+	private var m_context : GameContext;
+	
+	private var m_ship : PlayerShip;
 	private var m_polygons : Array<Polygon>;
 	private var m_enemyBullets : Array<Bullet>;
 	private var m_myBullets : Array<Bullet>;
 	
+	private var m_mousePosition : Point;
+	private var m_mousePositionDisplay : TextField;
 	private var m_myBulletsCountDisplay : TextField;
 	private var m_enemyBulletsCountDisplay : TextField;
 	private var m_modeDisplay : TextField;

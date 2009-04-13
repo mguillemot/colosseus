@@ -20,7 +20,6 @@ class EnemyShip extends GameEntity
 		g.height = 150;
 		addChild(g);
 		m_hitbox = new CircleHitbox(new Point(0, 0), 50);
-		addChild(m_hitbox.getRepresentation());
 	}
 	
 }

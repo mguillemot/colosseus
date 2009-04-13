@@ -4,6 +4,7 @@
  */
 
 package com.acrossoft.colosseus.hitboxes;
+import flash.display.DisplayObject;
 import flash.display.Shape;
 import flash.geom.Point;
 
@@ -18,11 +19,14 @@ class CircleHitbox
 
 	public function getRepresentation() : Shape
 	{
-		var s : Shape = new Shape();
-		s.graphics.clear();
-		s.graphics.lineStyle(1, 0xff0000);
-		s.graphics.drawCircle(m_center.x, m_center.y, m_radius);
-		return s;
+		if (m_representation == null)
+		{
+			m_representation = new Shape();
+			m_representation.graphics.clear();
+			m_representation.graphics.lineStyle(1, 0xff0000);
+			m_representation.graphics.drawCircle(m_center.x, m_center.y, m_radius);
+		}
+		return m_representation;
 	}
 	
 	public function getCenter() : Point
@@ -37,5 +41,6 @@ class CircleHitbox
 	
 	private var m_center : Point;
 	private var m_radius : Float;	
+	private var m_representation : Shape;
 	
 }

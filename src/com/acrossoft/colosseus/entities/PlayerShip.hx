@@ -19,7 +19,6 @@ class PlayerShip extends GameEntity
 		g.height = 40;
 		addChild(g);
 		m_hitbox = new CircleHitbox(new Point(0, 0), 10);
-		addChild(m_hitbox.getRepresentation());
 	}
 	
 }
