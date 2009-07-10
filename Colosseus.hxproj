@@ -18,7 +18,7 @@
   <!-- Build options -->
   <build>
     <option directives="" />
-    <option flashStrict="True" />
+    <option flashStrict="False" />
     <option mainClass="com.acrossoft.colosseus.Main" />
     <option override="False" />
     <option verbose="False" />

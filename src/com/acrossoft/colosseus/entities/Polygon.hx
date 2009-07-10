@@ -21,11 +21,16 @@ class Polygon extends GameEntity
 
 	public static inline var XML_ROOT_NAME : String = "polygon";
 	
+	private static inline var SELECT_NONE : Int = 0;
+	private static inline var SELECT_PRIMARY : Int = 1;
+	private static inline var SELECT_SECONDARY : Int = 2;
+	
 	public function new() 
 	{
 		super();
 		m_points = new Array<Point>();
 		m_turrets = new Array<Turret>();
+		m_parts = new Array<Polygon>();
 	}
 	
 	public override function update(context : GameContext) : Void
@@ -44,7 +49,17 @@ class Polygon extends GameEntity
 		{
 			if (!m_editing)
 			{
-				graphics.beginFill(if (m_selected) 0x42ECA3 else 0x42E43F, 0.8);
+				var color : UInt = 0;
+				switch (m_selectLevel)
+				{
+					case SELECT_NONE:
+						color = 0x42E43F;
+					case SELECT_PRIMARY:
+						color = 0x42ECA3;
+					case SELECT_SECONDARY:
+						color = 0xB0FF70;
+				}
+				graphics.beginFill(color, 0.8);
 			}
 			graphics.lineStyle(2, 0x007F0E);
 			var p : Point = m_points[0];
@@ -123,13 +138,48 @@ class Polygon extends GameEntity
 		return t;
 	}
 	
+	public function addPart(part : Polygon) : Void
+	{
+		part.parentEntity = this;
+		m_parts.push(part);
+		addChild(part);
+	}
+	
 	public function removeTurret(t : Turret) : Void
 	{
 		m_turrets.remove(t);
 		removeChild(t);
 	}
 	
+	public function removePart(part : Polygon) : Void
+	{
+		m_parts.remove(part);
+		removeChild(part);
+	}
+	
+	public function select(p : Point) : Polygon
+	{
+		if (isInsideMainBody(p))
+		{
+			return this;
+		}
+		for (part in m_parts)
+		{
+			var subSelect : Polygon = part.select(p);
+			if (subSelect != null)
+			{
+				return subSelect;
+			}
+		}
+		return null;
+	}
+	
 	public function isInside(p : Point) : Bool
+	{
+		return (select(p) != null);
+	}
+	
+	private function isInsideMainBody(p : Point) : Bool
 	{
 		if (!hitTestPoint(p.x, p.y))
 		{
@@ -193,6 +243,13 @@ class Polygon extends GameEntity
 			var turretNode : Xml = turret.toXml();
 			polygonNode.addChild(turretNode);
 		}
+		var partsNode : Xml = Xml.createElement("parts");
+		for (part in m_parts)
+		{
+			var partNode : Xml = part.toXml();
+			partsNode.addChild(partNode);
+		}
+		polygonNode.addChild(partsNode);
 		return polygonNode;
 	}
 	
@@ -216,6 +273,15 @@ class Polygon extends GameEntity
 			m_turrets.push(turret);
 			addChild(turret);
 			turret.startFire();
+		}
+		for (partsData in xml.elementsNamed("parts"))
+		{
+			for (partData in partsData.elementsNamed(XML_ROOT_NAME))
+			{
+				var part : Polygon = new Polygon();
+				part.fromXml(partData);
+				addPart(part);
+			}
 		}
 		recreateGraphics();
 	}
@@ -267,17 +333,35 @@ class Polygon extends GameEntity
 
 	public var selected(getSelected, setSelected) : Bool;
 	public var turrets(getTurrets, null) : Array<Turret>;
+	public var parentEntity(getParentEntity, setParentEntity) : Polygon;
 	
 	private function getSelected() : Bool
 	{
-		return m_selected;
+		return m_selectLevel != SELECT_NONE;
 	}
 	
 	private function setSelected(value : Bool) : Bool
 	{
-		m_selected = value;
+		for (part in m_parts)
+		{
+			if (value)
+			{
+				part.secondarySelect();
+			}
+			else 
+			{
+				part.selected = false;
+			}
+		}
+		m_selectLevel = if (value) SELECT_PRIMARY else SELECT_NONE;
 		recreateGraphics();
-		return m_selected;
+		return value;
+	}
+	
+	public function secondarySelect() : Void
+	{
+		m_selectLevel = SELECT_SECONDARY;
+		recreateGraphics();
 	}
 	
 	private function getTurrets() : Array<Turret>
@@ -285,9 +369,21 @@ class Polygon extends GameEntity
 		return m_turrets;
 	}
 	
+	private function getParentEntity() : Polygon
+	{
+		return m_parent;
+	}
+	
+	private function setParentEntity(value : Polygon) : Polygon
+	{
+		return m_parent = value;
+	}
+	
 	private var m_points : Array<Point>;
 	private var m_turrets : Array<Turret>;
+	private var m_parent : Polygon;
+	private var m_parts : Array<Polygon>;
 	private var m_editing : Bool;
-	private var m_selected : Bool;
+	private var m_selectLevel : Int;
 	
 }

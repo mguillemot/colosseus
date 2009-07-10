@@ -29,6 +29,7 @@ import flash.net.FileReference;
 import flash.net.SharedObject;
 import flash.text.TextField;
 import flash.text.TextFieldAutoSize;
+import flash.utils.Dictionary;
 import flash.utils.Timer;
 
 /**
@@ -56,6 +57,7 @@ class Main extends Sprite
 		m_context = new GameContext();
 		m_context.currentTime = Lib.getTimer();
 		m_mousePosition = new Point();
+		m_buttonCallbacks = new Hash < Void -> Void > ();
 	}
 	
 	private function init() : Void
@@ -84,7 +86,7 @@ class Main extends Sprite
 
 		stage.addEventListener(KeyboardEvent.KEY_DOWN, onKeyDown);
 		stage.addEventListener(KeyboardEvent.KEY_UP, onKeyUp);
-		stage.addEventListener(MouseEvent.MOUSE_DOWN, onMouseDown);
+		stage.addEventListener(MouseEvent.CLICK, onMouseDown);
 		stage.addEventListener(MouseEvent.MOUSE_MOVE, onMouseMove);
 		
 		//var t : CyclicSinTween = new CyclicSinTween(300, 200, 5000, m_enemy, "x");
@@ -132,12 +134,13 @@ class Main extends Sprite
 		stage.addChild(m_modeDisplay);
 		refreshFields();
 		
-		stage.addEventListener(Event.ENTER_FRAME, frameUpdate );
+		stage.addEventListener(Event.ENTER_FRAME, frameUpdate);
 	}
 	
 	private function addButton(label : String, onClick : Void -> Void) : Void
 	{
 		var button : Sprite = new Sprite();
+		button.name = label;
 		button.x = stage.width - 200 + 100 * m_nextButton.x;
 		button.y = 120 + 40 * m_nextButton.y;
 		button.graphics.clear();
@@ -151,7 +154,9 @@ class Main extends Sprite
 		text.htmlText = '<font size="16">' + label + '</font>';
 		text.autoSize = TextFieldAutoSize.CENTER;
 		text.mouseEnabled = false;
-		button.addEventListener(MouseEvent.CLICK, function(e : MouseEvent) : Void { onClick(); });
+		var e : MouseEvent;
+		button.addEventListener(MouseEvent.CLICK, onButtonClick);
+		m_buttonCallbacks.set(button.name, onClick);
 		stage.addChild(button);
 		
 		m_nextButton.x++;
@@ -162,9 +167,15 @@ class Main extends Sprite
 		}
 	}
 	
+	private function onButtonClick(e : MouseEvent) : Void
+	{
+		m_buttonCallbacks.get(e.target.name)();
+		e.stopPropagation(); 
+	}
+	
 	private function onCreateButtonClick() : Void
 	{
-		if (m_editMode != EditMode.NONE)
+		if (m_editMode != EditMode.NONE && m_editMode != EditMode.SELECTED)
 		{
 			onEscape();
 		}
@@ -182,6 +193,11 @@ class Main extends Sprite
 	
 	private function onRotateButtonClick() : Void
 	{
+		if (m_editMode == EditMode.SELECTED)
+		{
+			changeEditMode(EditMode.ROTATE_WAIT_FOR_DROP);
+			return;
+		}
 		if (m_editMode != EditMode.NONE)
 		{
 			onEscape();
@@ -296,6 +312,9 @@ class Main extends Sprite
 	{
 		switch (m_editMode)
 		{
+			case EditMode.SELECTED:
+				selectPoly(null);
+				changeEditMode(EditMode.NONE);
 			case EditMode.CREATE_PLACE_CENTER:
 				changeEditMode(EditMode.NONE);
 			case EditMode.CREATE_ADD_POINT: 
@@ -376,6 +395,31 @@ class Main extends Sprite
 		//trace("Click @ " + e.stageX + ":" + e.stageY);
 		switch (m_editMode)
 		{
+			case EditMode.NONE:
+				var p : Point = new Point(e.stageX, e.stageY);
+				for (poly in m_polygons)
+				{
+					var selected : Polygon = poly.select(p);
+					if (selected != null)
+					{
+						selectPoly(selected);
+						changeEditMode(EditMode.SELECTED);
+						break;
+					}
+				}
+			case EditMode.SELECTED:
+				var p : Point = new Point(e.stageX, e.stageY);
+				for (poly in m_polygons)
+				{
+					var selected : Polygon = poly.select(p);
+					if (selected != null)
+					{
+						selectPoly(selected);
+						changeEditMode(EditMode.SELECTED);
+						return;
+					}
+				}
+				onEscape();
 			case EditMode.CREATE_PLACE_CENTER:
 				m_editingPolygon = new Polygon();
 				m_editingPolygon.x = e.stageX;
@@ -388,40 +432,57 @@ class Main extends Sprite
 				m_editingPolygon.addPoint(p);
 				if (!m_editingPolygon.isEditing())
 				{
-					m_polygons.push(m_editingPolygon);
+					if (m_selectedPolygon != null)
+					{
+						var localCenter : Point = m_selectedPolygon.globalToLocal(new Point(m_editingPolygon.x, m_editingPolygon.y));
+						m_editingPolygon.x = localCenter.x;
+						m_editingPolygon.y = localCenter.y;
+						m_editingPolygon.rotation -= m_selectedPolygon.rotation;
+						m_selectedPolygon.addPart(m_editingPolygon);
+						changeEditMode(EditMode.SELECTED);
+					}
+					else
+					{
+						m_polygons.push(m_editingPolygon);
+						changeEditMode(EditMode.NONE);
+					}
 					m_editingPolygon = null;
-					changeEditMode(EditMode.NONE);
 				}
 			case EditMode.MOVE_CHOOSE:
 				var p : Point = new Point(e.stageX, e.stageY);
 				for (poly in m_polygons)
 				{
-					if (poly.isInside(p))
+					var selected : Polygon = poly.select(p);
+					if (selected != null)
 					{
-						selectPoly(poly);
+						selectPoly(selected);
 						poly.startDrag();
 						changeEditMode(EditMode.MOVE_WAIT_FOR_DROP);
-						break;
+						return;
 					}
 				}
+				onEscape();
 			case EditMode.ROTATE_CHOOSE:
 				var p : Point = new Point(e.stageX, e.stageY);
 				for (poly in m_polygons)
 				{
-					if (poly.isInside(p))
+					var selected : Polygon = poly.select(p);
+					if (selected != null)
 					{
-						selectPoly(poly);
+						selectPoly(selected);
+						trace("selected rotation=" + selected.rotation);
 						changeEditMode(EditMode.ROTATE_WAIT_FOR_DROP);
-						break;
+						return;
 					}
 				}
+				onEscape();
 			case EditMode.MOVE_WAIT_FOR_DROP:
 				m_selectedPolygon.stopDrag();
 				selectPoly(null);
-				changeEditMode(EditMode.MOVE_CHOOSE);
+				changeEditMode(EditMode.NONE);
 			case EditMode.ROTATE_WAIT_FOR_DROP:
 				selectPoly(null);
-				changeEditMode(EditMode.ROTATE_CHOOSE);
+				changeEditMode(EditMode.NONE);
 			case EditMode.DELETE_CHOOSE:
 				var p : Point = new Point(e.stageX, e.stageY);
 				for (poly in m_polygons)
@@ -446,16 +507,19 @@ class Main extends Sprite
 						stage.addChild(m_placingTurret);
 						m_placingTurret.startDrag();
 						changeEditMode(EditMode.PLACE_TURRET_WAIT_FOR_DROP);
-						break;
+						return;
 					}
 				}
+				onEscape();
 			case EditMode.PLACE_TURRET_WAIT_FOR_DROP:
 				var p : Point = new Point(e.stageX, e.stageY);
 				if (m_selectedPolygon.isInside(p))
 				{
 					var t : Turret = m_selectedPolygon.addTurret(m_selectedPolygon.globalToLocal(p));
 					t.startFire();
+					return;
 				}
+				onEscape();
 			case EditMode.CHANGE_TURRET:
 				for (poly in m_polygons)
 				{
@@ -490,9 +554,11 @@ class Main extends Sprite
 		m_mousePosition.y = e.stageY;
 		if (m_editMode == EditMode.ROTATE_WAIT_FOR_DROP)
 		{
-			var ac : Vector3D = new Vector3D(e.stageX - m_selectedPolygon.x, e.stageY - m_selectedPolygon.y, 0);
+			var selectionOrigin : Point = m_selectedPolygon.localToGlobal(new Point(0, 0));
+			var ac : Vector3D = new Vector3D(e.stageX - selectionOrigin.x, e.stageY - selectionOrigin.y, 0);
 			var theta = Math.atan2(ac.y, ac.x);
 			m_selectedPolygon.rotation = theta / Math.PI * 180;
+			trace("theta=" + theta);
 		}
 	}
 	
@@ -502,7 +568,7 @@ class Main extends Sprite
 		refreshFields();
 	}
 	
-	private function selectPoly(poly : Polygon)
+	private function selectPoly(poly : Polygon, stageClickPoint : Point)
 	{
 		if (m_selectedPolygon != null)
 		{
@@ -514,6 +580,7 @@ class Main extends Sprite
 			m_selectedPolygon.selected = true;
 			m_editInitialPosition = new Point(m_selectedPolygon.x, m_selectedPolygon.y);
 			m_editInitialRotation = m_selectedPolygon.rotation;
+			m_editClickPoint = stageClickPoint;
 		}
 	}
 	
@@ -611,6 +678,7 @@ class Main extends Sprite
 		refreshFields();
 	}
 	
+	private var m_buttonCallbacks : Hash < Void -> Void >;
 	private var m_nextButton : Point;
 	
 	private var m_editMode : EditMode;
@@ -618,6 +686,7 @@ class Main extends Sprite
 	private var m_selectedPolygon : Polygon;
 	private var m_editInitialPosition : Point;
 	private var m_editInitialRotation : Float;
+	private var m_selectPoint : Point;
 	private var m_placingTurret : Turret;
 	
 	private var m_context : GameContext;
